@@ -117,7 +117,7 @@
   ;; Correct the selection cursor if necessary
   (when (< (cursor) (file-row)) (cursor (file-row)))
   (when (> (cursor)
-	   (+ (file-row) (length (drop lst start-point))))
+	   (min max-vid (length (drop lst start-point))))
     (cursor max-vid))
   
   (let loop ((pos (file-row)) (videos (drop lst start-point)))
