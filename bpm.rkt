@@ -58,33 +58,40 @@
 	(height (- rows 2)))
     (charterm-cursor 1 1)
     ;; Box corner upper-left
-    (charterm-display (integer->char 2554))
+    ;; (charterm-display "\u2554")
+    (charterm-display "|")
     ;; Top edge of box
-    (charterm-display (make-string width (integer->char 2550)))
+    ;; (charterm-display (make-string width #\u2550))
+    (charterm-display (make-string width #\=))
     ;; Box corner upper-right
-    (charterm-display (integer->char 2557))
+    ;; (charterm-display "\u2557")
+    (charterm-display "|")
     (charterm-newline)
     ;; Left side
     (for-each
      (λ (x)
        (charterm-cursor 1 x)
-       (charterm-display (integer->char 2551)))
+       ;; (charterm-display "\u2551"))
+       (charterm-display "|"))
      (range 2 height))
     ;; Right side
     (for-each
      (λ (x)
-       (charterm-cursor (+ width 1) x)
-       ;; (charterm-display (integer->char 2551)))
-       (charterm-display (integer->char 0001)))
+       (charterm-cursor (+ width 2) x)
+       ;; (charterm-display "\u2551"))
+       (charterm-display "|"))
      (range 2 height))
 
     ;; Box corner lower-left
     (charterm-cursor 1 height)
-    (charterm-display (integer->char 2554))
+    ;; (charterm-display "\u255A")
+    (charterm-display "|")
     ;; Bottom edge of box
-    (charterm-display (make-string width (integer->char 2550)))
+    ;; (charterm-display (make-string width #\u2550))
+    (charterm-display (make-string width #\=))
     ;; Box corner upper-right
-    (charterm-display (integer->char 2557))))
+    ;; (charterm-display "\u255D")))
+    (charterm-display "|")))
 
 
 ;;; Use this to determine which video file is listed first on the
