@@ -107,7 +107,7 @@
 	tmp)))
 
 ;;; Displays video titles, along with any meta-data info
-(define (display-titles lst cols rows)
+(define (display-titles lst cols rows #:numbers? (numbers? #f))
 
   (define max-vid (- rows 3))
   ;;; (define max-vid 9) ;; debug
@@ -140,8 +140,15 @@
 	  (cursor max-vid))))
   
   (let loop ((pos (file-row)) (videos (drop lst start-point)))
-    (charterm-cursor 8 pos)
+    (charterm-cursor 2 pos)
     (charterm-clear-line-right)
+    
+    (when numbers?
+      (begin
+	(charterm-cursor 3 pos)
+	 (charterm-display (format "~A" (- pos (sub1 (file-row)))))))
+
+    (charterm-cursor 8 pos)
     (if (= pos (cursor))
 	(begin
 	  (charterm-inverse)
@@ -162,8 +169,8 @@
   (draw-box cols rows))
 
 ;;; Call this whenever anything is updated
-(define (draw-ui video-files cols rows)
-  (display-titles video-files cols rows))
+(define (draw-ui video-files cols rows #:numbers? (numbers? #f))
+  (display-titles video-files cols rows #:numbers? numbers?))
 
 ;;; Play video file at cursor
 (define (play-selection lst rows)
@@ -350,6 +357,12 @@
 				  (loop-fast-next-key))
 				 ((#\space)
 				  (play-selection video-files read-row-count)
+				  (loop-fast-next-key))
+				 ((#\n)
+				  (draw-ui video-files
+						  read-col-count
+						  read-row-count
+						  #:numbers? #t)
 				  (loop-fast-next-key))
 				 ;; ((backspace)
 				 ;;  (%charterm:demo-input-backspace di)
