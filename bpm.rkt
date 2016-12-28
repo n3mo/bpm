@@ -11,6 +11,8 @@
 (define page (make-parameter 1))
 ;;; Cursor position
 (define cursor (make-parameter 3))
+;;; Cursor wrap from beginning<->end of list?
+(define cursor-wrap (make-parameter #t))
 ;;; Row number of start of file listing
 (define file-row (make-parameter 3))
 
@@ -97,28 +99,45 @@
 ;;; Use this to determine which video file is listed first on the
 ;;; current page
 (define (page-lead lst-length rows)
-  (define max-vid (- rows 4))
+  (define max-vid (- rows 3))
+  ;;; (define max-vid 9) ;; debug
   (let ((tmp (add1 (* (sub1 (page)) max-vid))))
     (if (> (+ tmp (sub1 max-vid)) lst-length)
-	(- lst-length max-vid)
+	(max 0 (- lst-length max-vid))
 	tmp)))
 
 ;;; Displays video titles, along with any meta-data info
 (define (display-titles lst cols rows)
 
-  (define max-vid (- rows 4))
+  (define max-vid (- rows 3))
   ;;; (define max-vid 9) ;; debug
   
   ;; Don't let the user scroll past the last page of results
-  ;; (when (> (* (page) max-vid) (length lst)) (page (sub1 (page))))
+  (when (> (* (sub1 (page)) max-vid) (length lst)) (page (sub1 (page))))
   (when (<= (page) 0) (page 1))
   (define start-point (page-lead (length lst) rows))
 
+  ;; End point. This is determined by the lesser of max-vid or the
+  ;; number of videos in the list
+  (define end-point
+    (let ((n (length (drop lst start-point))))
+      (if (< n max-vid)
+	  (+ (sub1 (file-row)) n)
+	  (min max-vid n))))
+
   ;; Correct the selection cursor if necessary
-  (when (< (cursor) (file-row)) (cursor (file-row)))
-  (when (> (cursor)
-	   (min max-vid (length (drop lst start-point))))
-    (cursor max-vid))
+  (if (cursor-wrap)
+      ;; Wrap cursor when top/bottom is reached
+      (begin
+	(when (< (cursor) (file-row)) (cursor end-point))
+	(when (> (cursor) end-point) (cursor (file-row))))
+
+      ;; Do NOT wrap cursor when top/bottom is reached
+      (begin
+	(when (< (cursor) (file-row)) (cursor (file-row)))
+	(when (> (cursor)
+		 (min max-vid (length (drop lst start-point))))
+	  (cursor max-vid))))
   
   (let loop ((pos (file-row)) (videos (drop lst start-point)))
     (charterm-cursor 8 pos)
@@ -131,7 +150,7 @@
 	  (charterm-normal))
 	(charterm-display
 	 (path->string (file-name-from-path (car videos)))))
-    (unless (= pos max-vid)
+    (unless (or (= pos max-vid) (null? (cdr videos)))
       (loop (+ pos 1) (cdr videos))))
   ;; Redraw UI interface around file list
   (charterm-cursor 3 2)
