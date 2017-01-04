@@ -15,6 +15,8 @@
 (define cursor-wrap (make-parameter #t))
 ;;; Row number of start of file listing
 (define file-row (make-parameter 3))
+;;; Dialog location (top row of dialog box)
+(define dialog-row (make-parameter 20))
 
 ;;; Files ending in the following extensions will be
 ;;; included in all operations. Add accordingly
@@ -25,14 +27,15 @@
 ;;; If no path is supplied, the following default is used. For
 ;;; more general audiences, this should probably be changed to "."
 ;; (define default-path "~/media/Television/")
-(define default-path "~/main/work/teach/resources/intro_psych/videos/")
+;; (define default-path "~/main/work/teach/resources/intro_psych/videos/")
+(define default-path "~/Desktop/tmp/")
 
 ;;; Location of trash directory on this system. For now, this assumes
 ;;; that you're either using Mac OS X or linux...
 (define trash-path
   (if (equal? 'macosx (system-type))
-      "~/.Trash/"
-      "~/.local/share/Trash/files/"))
+      (expand-user-path "~/.Trash/")
+      (expand-user-path "~/.local/share/Trash/files/")))
 
 ;;; Find valid video files in directory (recursively)
 (define (file-list [starting-path default-path])
@@ -146,7 +149,7 @@
     (when numbers?
       (begin
 	(charterm-cursor 3 pos)
-	 (charterm-display (format "~A" (- pos (sub1 (file-row)))))))
+	(charterm-display (format "~A" (- pos (sub1 (file-row)))))))
 
     (charterm-cursor 8 pos)
     (if (= pos (cursor))
@@ -169,8 +172,28 @@
   (draw-box cols rows))
 
 ;;; Call this whenever anything is updated
-(define (draw-ui video-files cols rows #:numbers? (numbers? #f))
-  (display-titles video-files cols rows #:numbers? numbers?))
+(define (draw-ui video-files cols rows
+		 #:numbers? (numbers? #f)
+		 #:delete? (delete? #f))
+  (display-titles video-files cols rows #:numbers? numbers?)
+  (when delete?
+    (charterm-cursor 3 (- rows 1))
+    (charterm-clear-line-right)
+    (charterm-display "Delete file(s)?  [Y]es  ")
+    (let ((keyinfo (charterm-read-keyinfo #:timeout #f)))
+      (let ((keycode (charterm-keyinfo-keycode keyinfo)))
+	    (case keycode
+	      ;; Confirm deletion
+	      ((#\Y)
+	       (trash-files video-files)
+	       (run-bpm))
+	      (else
+	       (begin
+		 (charterm-cursor 3 (- rows 1))
+		 (charterm-clear-line-right)
+		 (charterm-display "Deletion Aborted")
+		 (charterm-read-keyinfo #:timeout 2)
+		 (run-bpm))))))))
 
 ;;; Play video file at cursor
 (define (play-selection lst rows)
@@ -183,6 +206,38 @@
       (thread (λ ()
 		(system* (find-executable-path "mplayer")
 			 (path->string (expand-user-path path))))))))
+
+;;; Dialog for deleting files
+(define (delete-selection lst cols rows)
+  (let* ((idx (page-lead (length lst) rows))
+	 (path (list-ref (drop lst idx) (- (cursor) (file-row))))
+	 (dir (let-values ([(a b c) (split-path path)]) a))
+	 (file-name (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
+				    (path->string (file-name-from-path path)) ""))
+	 (files
+	  (find-files
+	   (λ (x)
+	     (let ([tmp (file-name-from-path x)])
+	       (if tmp
+		 (string=? file-name
+			   (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
+					   (path->string tmp) ""))
+		 #f)))
+	   dir)))
+    (draw-ui files cols rows #:delete? #t)))
+
+;;; Function for actually trashing files
+(define (trash-files lst)
+  (for-each
+   (λ (x)
+     (let ((ext (bytes->string/latin-1 (path-get-extension x)))
+	   (file-name (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
+				      (path->string (file-name-from-path x)) "")))
+       (rename-file-or-directory
+	x
+	(string->path (string-append (path->string trash-path)
+				     file-name ext)))))
+   lst))
 
 ;; (define (%charterm:demo-input-redraw di)
 ;;   (charterm-cursor (%charterm:demo-input-x di)
@@ -226,7 +281,9 @@
                (if read-screen-size-changed?
 
                    ;; Screen size changed.
-                   (begin 
+                   (begin
+		     ;; Set window parameters
+		     (dialog-row (- (round (/ read-row-count 2)) 3))
 		     (charterm-clear-screen)
 		     ;; (draw-box read-col-count read-row-count)
 		     ;; (charterm-cursor 3 2)
@@ -307,25 +364,25 @@
                        (let ((keyinfo (charterm-read-keyinfo #:timeout 1)))
                          (if keyinfo
                              (let ((keycode (charterm-keyinfo-keycode keyinfo)))
-                               (charterm-cursor 1 (sub1 read-row-count))
-                               (charterm-insert-line)
-                               (charterm-display "Read key: ")
-                               (charterm-bold)
-                               (charterm-display (or (charterm-keyinfo-keylabel keyinfo) "???"))
-                               (charterm-normal)
-                               (charterm-display (format " ~S"
-                                                         `(,(charterm-keyinfo-keyset-id    keyinfo)
-                                                           ,(charterm-keyinfo-bytelang     keyinfo)
-                                                           ,(charterm-keyinfo-bytelist     keyinfo)
-                                                           ,@(charterm-keyinfo-all-keycodes keyinfo))))
+                               ;; (charterm-cursor 1 (sub1 read-row-count))
+                               ;; (charterm-insert-line)
+                               ;; (charterm-display "Read key: ")
+                               ;; (charterm-bold)
+                               ;; (charterm-display (or (charterm-keyinfo-keylabel keyinfo) "???"))
+                               ;; (charterm-normal)
+                               ;; (charterm-display (format " ~S"
+                               ;;                           `(,(charterm-keyinfo-keyset-id    keyinfo)
+                               ;;                             ,(charterm-keyinfo-bytelang     keyinfo)
+                               ;;                             ,(charterm-keyinfo-bytelist     keyinfo)
+                               ;;                             ,@(charterm-keyinfo-all-keycodes keyinfo))))
                                (case keycode				 
-				 ((left)
+				 ((left pgup)
 				  (begin (page (sub1 (page)))
 					 (draw-ui video-files
 						  read-col-count
 						  read-row-count))
 				  (loop-fast-next-key))
-				 ((right)
+				 ((right pgdn)
 				  (begin (page (add1 (page)))
 					 (draw-ui video-files
 						  read-col-count
@@ -360,9 +417,15 @@
 				  (loop-fast-next-key))
 				 ((#\n)
 				  (draw-ui video-files
-						  read-col-count
-						  read-row-count
-						  #:numbers? #t)
+					   read-col-count
+					   read-row-count
+					   #:numbers? #t)
+				  (loop-fast-next-key))
+				 ;; Deleting files
+				 ((#\d)
+				  (delete-selection video-files
+						    read-col-count
+						    read-row-count)
 				  (loop-fast-next-key))
 				 ;; ((backspace)
 				 ;;  (%charterm:demo-input-backspace di)
