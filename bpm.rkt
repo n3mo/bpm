@@ -5,6 +5,9 @@
 (require charterm)
 (require racket/path)
 
+;;; Current version
+(define bpm-version "0.0.1 (2017-01-04)")
+
 ;;; Parameters ----------------------------------------
 
 ;;; Current page of results
@@ -17,6 +20,8 @@
 (define file-row (make-parameter 3))
 ;;; Dialog location (top row of dialog box)
 (define dialog-row (make-parameter 20))
+;;; Current working directory root
+(define root-path (make-parameter #f))
 
 ;;; Files ending in the following extensions will be
 ;;; included in all operations. Add accordingly
@@ -40,7 +45,7 @@
 ;;; Find valid video files in directory (recursively)
 (define (file-list [starting-path default-path])
   (find-files (λ (x) (member (path-get-extension x) valid-extensions))
-	      (expand-user-path default-path)))
+	      (expand-user-path starting-path)))
 
 
 (define (%charterm:string-pad-or-truncate str width)
@@ -256,7 +261,7 @@
          (let loop-remember-read-screen-size ((last-read-col-count 0)
                                               (last-read-row-count 0))
 
-           (let loop-maybe-check-screen-size ((video-files (file-list)))
+           (let loop-maybe-check-screen-size ((video-files (file-list (root-path))))
              (let*-values (((read-col-count read-row-count)
                             (if (or (equal? 0 last-read-col-count)
                                     (equal? 0 last-read-row-count)
@@ -446,6 +451,29 @@
                                (loop-maybe-check-screen-size video-files)))))))))))))))
 
 
+;; Prints the current version of massmine, and useful info
+(define (print-version)
+  (displayln (string-append "bpm: Browse, Play, Manage " bpm-version))
+  (displayln "https://github.com/n3mo/bpm")
+  (newline)
+  (displayln "Copyright (C) 2017 Nicholas M. Van Horn")
+  (displayln "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.")
+  (displayln "This is free software: you are free to change and redistribute it.")
+  (displayln "There is NO WARRANTY, to the extent permitted by law.")
+  (exit 0))
+
+;;; Command line parsing
+(define filepath
+  (command-line
+   #:program "bpm"
+   ;; #:once-each
+   #:once-any
+   [("-v" "--version") "Version info" (print-version)]
+   #:args
+   ([dir-path null])
+   dir-path))
+
+
 ;;; Get things going
 (define (main)
   ;; (let main-loop ([video-files (file-list)])
@@ -460,6 +488,8 @@
   ;;      (charterm-display x)
   ;;      (charterm-newline))
   ;;    (take video-files 10)))
+  (root-path filepath)
+  (when (null? (root-path)) (root-path default-path))
   (run-bpm))
 
 
