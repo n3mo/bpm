@@ -274,6 +274,52 @@
 				     file-name ext)))))
    lst))
 
+;;; Display file information
+(define (file-info lst cols rows)
+  (if (> rows 4)
+      (let* ((idx (page-lead (length lst) rows))
+	     (path (list-ref (drop lst idx) (- (cursor) (file-row))))
+	     (box-top (- (round (/ rows 2)) 1))
+	     ;; (box-bottom (+ box-top 7))
+	     (box-left 4)	     
+	     (box-width (- cols (* box-left 2)))
+	     (box-right (sub1 (+ box-left box-width))))
+	(charterm-cursor box-left box-top)
+	(charterm-display (make-string box-width #\+))
+	
+	(charterm-cursor box-left (+ box-top 1))
+	(charterm-display (make-string 1 #\+))
+	(charterm-display " " #:width (- box-width 2))
+	(charterm-display (make-string 1 #\+))
+	
+	(charterm-cursor box-left (+ box-top 2))
+	(charterm-display (make-string 1 #\+))
+	(charterm-display " " #:width (- box-width 2))
+	(charterm-cursor (- (round (/ cols 2)) 4) (+ box-top 2))
+	(charterm-display "FILE PATH:")
+	(charterm-cursor box-right (+ box-top 2))
+	(charterm-display (make-string 1 #\+))
+
+	(charterm-cursor box-left (+ box-top 3))
+	(charterm-display (make-string 1 #\+))
+	(charterm-display "  " (path->string (path->complete-path path)) #:width (- box-width 3))
+	(charterm-display " ")
+	(charterm-display (make-string 1 #\+))
+
+	(charterm-cursor box-left (+ box-top 4))
+	(charterm-display (make-string 1 #\+))
+	(charterm-display " " #:width (- box-width 2))
+	(charterm-display (make-string 1 #\+))
+	
+	(charterm-cursor box-left (+ box-top 5))
+	(charterm-display (make-string box-width #\+))
+
+	(charterm-cursor cols (add1 rows)))
+      ;; Terminal is too small, display warning
+      (begin (charterm-cursor 1 1)
+	     (charterm-clear-line-right)
+	     (charterm-display "Your terminal window is too small"))))
+
 ;; (define (%charterm:demo-input-redraw di)
 ;;   (charterm-cursor (%charterm:demo-input-x di)
 ;;                    (%charterm:demo-input-y di))
@@ -384,6 +430,12 @@
 				  (delete-selection video-files
 						    read-col-count
 						    read-row-count)
+				  (loop-fast-next-key))
+				 ;; File information
+				 ((#\i)
+				  (file-info video-files
+					     read-col-count
+					     read-row-count)
 				  (loop-fast-next-key))
 				 ;; ((backspace)
 				 ;;  (%charterm:demo-input-backspace di)
