@@ -22,6 +22,10 @@
 (define dialog-row (make-parameter 20))
 ;;; Current working directory root
 (define root-path (make-parameter #f))
+;;; Status message? When set to true, the main read key loop will
+;;; pause extra long, before clearing the message and redrawing the
+;;; screen
+(define message? (make-parameter #f))
 
 ;;; Files ending in the following extensions will be
 ;;; included in all operations. Add accordingly
@@ -115,14 +119,19 @@
 	tmp)))
 
 ;;; Displays video titles, along with any meta-data info
-(define (display-titles lst cols rows #:numbers? (numbers? #f))
+(define (display-titles lst cols rows
+			#:numbers? (numbers? #f)
+			#:clear? (clear? #f)
+			#:draw-cursor? (draw-cursor? #t)
+			#:pageless? (pageless? #f))
 
   (define max-vid (- rows 3))
   ;;; (define max-vid 9) ;; debug
   
-  ;; Don't let the user scroll past the last page of results
-  (when (> (* (sub1 (page)) max-vid) (length lst)) (page (sub1 (page))))
-  (when (<= (page) 0) (page 1))
+  (unless pageless?
+    ;; Don't let the user scroll past the last page of results
+    (when (> (* (sub1 (page)) max-vid) (length lst)) (page (sub1 (page))))
+    (when (<= (page) 0) (page 1)))
   (define start-point (page-lead (length lst) rows))
 
   ;; End point. This is determined by the lesser of max-vid or the
@@ -134,19 +143,31 @@
 	  (min max-vid n))))
 
   ;; Correct the selection cursor if necessary
-  (if (cursor-wrap)
-      ;; Wrap cursor when top/bottom is reached
-      (begin
-	(when (< (cursor) (file-row)) (cursor end-point))
-	(when (> (cursor) end-point) (cursor (file-row))))
+  (unless pageless?
+    (if (cursor-wrap)
+	;; Wrap cursor when top/bottom is reached
+	(begin
+	  (when (< (cursor) (file-row)) (cursor end-point))
+	  (when (> (cursor) end-point) (cursor (file-row))))
 
-      ;; Do NOT wrap cursor when top/bottom is reached
-      (begin
-	(when (< (cursor) (file-row)) (cursor (file-row)))
-	(when (> (cursor)
-		 (min max-vid (length (drop lst start-point))))
-	  (cursor max-vid))))
-  
+	;; Do NOT wrap cursor when top/bottom is reached
+	(begin
+	  (when (< (cursor) (file-row)) (cursor (file-row)))
+	  (when (> (cursor)
+		   (min max-vid (length (drop lst start-point))))
+	    (cursor max-vid)))))
+
+  ;; Clear all rows. This is only necessary when displaying a short
+  ;; list of files on top of a long list (e.g., when displaying files
+  ;; to be deleted).
+  ;; Clear screen manually to avoid calling full clear screen
+  (when clear?
+    (for-each
+     (λ (x)
+       (charterm-cursor 1 x)
+       (charterm-clear-line-right))
+     (range 1 rows)))
+
   (let loop ((pos (file-row)) (videos (drop lst start-point)))
     (charterm-cursor 2 pos)
     (charterm-clear-line-right)
@@ -157,7 +178,7 @@
 	(charterm-display (format "~A" (- pos (sub1 (file-row)))))))
 
     (charterm-cursor 8 pos)
-    (if (= pos (cursor))
+    (if (and draw-cursor? (= pos (cursor)))
 	(begin
 	  (charterm-inverse)
 	  (charterm-display
@@ -169,6 +190,7 @@
       (loop (+ pos 1) (cdr videos))))
   ;; Redraw UI interface around file list
   (charterm-cursor 3 2)
+  (charterm-clear-line-right)
   (charterm-inverse)
   (charterm-display (format "File list (~A files) (page ~A)"
 					       (length lst)
@@ -179,26 +201,31 @@
 ;;; Call this whenever anything is updated
 (define (draw-ui video-files cols rows
 		 #:numbers? (numbers? #f)
-		 #:delete? (delete? #f))
-  (display-titles video-files cols rows #:numbers? numbers?)
-  (when delete?
+		 #:delete? (delete? #f)
+		 #:draw-cursor? (draw-cursor? #t)
+		 #:pageless? (pageless? #f))
+  (display-titles video-files cols rows
+		  #:numbers? numbers?
+		  #:clear? #t
+		  #:draw-cursor? draw-cursor?
+		  #:pageless? pageless?)
+
+  ;; Delete mode UI -------------------------
+  (when delete?    
     (charterm-cursor 3 (- rows 1))
-    (charterm-clear-line-right)
     (charterm-display "Delete file(s)?  [Y]es  ")
     (let ((keyinfo (charterm-read-keyinfo #:timeout #f)))
       (let ((keycode (charterm-keyinfo-keycode keyinfo)))
 	    (case keycode
 	      ;; Confirm deletion
 	      ((#\Y)
-	       (trash-files video-files)
-	       (run-bpm))
+	       (trash-files video-files))
 	      (else
 	       (begin
 		 (charterm-cursor 3 (- rows 1))
 		 (charterm-clear-line-right)
 		 (charterm-display "Deletion Aborted")
-		 (charterm-read-keyinfo #:timeout 2)
-		 (run-bpm))))))))
+		 (message? #t))))))))
 
 ;;; Play video file at cursor
 (define (play-selection lst rows)
@@ -229,7 +256,10 @@
 					   (path->string tmp) ""))
 		 #f)))
 	   dir)))
-    (draw-ui files cols rows #:delete? #t)))
+    (draw-ui files cols rows
+	     #:delete? #t
+	     #:draw-cursor? #f
+	     #:pageless? #t)))
 
 ;;; Function for actually trashing files
 (define (trash-files lst)
@@ -254,14 +284,15 @@
 ;;   (charterm-normal))
 
 (define (run-bpm)
-  (let ((data-row 12))
+  (let ((data-row 12)
+	(video-files (file-list (root-path))))
     (with-charterm
      (let ((ct (current-charterm)))
        (let/ec done-ec
          (let loop-remember-read-screen-size ((last-read-col-count 0)
                                               (last-read-row-count 0))
 
-           (let loop-maybe-check-screen-size ((video-files (file-list (root-path))))
+           (let loop-maybe-check-screen-size ()
              (let*-values (((read-col-count read-row-count)
                             (if (or (equal? 0 last-read-col-count)
                                     (equal? 0 last-read-row-count)
@@ -290,96 +321,18 @@
 		     ;; Set window parameters
 		     (dialog-row (- (round (/ read-row-count 2)) 3))
 		     (charterm-clear-screen)
-		     ;; (draw-box read-col-count read-row-count)
-		     ;; (charterm-cursor 3 2)
-		     ;; (charterm-inverse)
-		     ;; (charterm-display (format "File list (~A files) (page ~A)"
-		     ;; 			       (length video-files)
-		     ;; 			       (page)))
-		     ;; ;; (charterm-cursor 1 3)
-		     ;; (charterm-normal)
 		     (draw-ui video-files read-col-count read-row-count)		     
-
-		     ;;(charterm-cursor 1 data-row)
-		     ;;(charterm-display "To quit, press ")
-		     ;;(charterm-bold)
-		     ;;(charterm-display "Esc")
-		     ;;(charterm-normal)
-		     ;;(charterm-display ".")
-		     
-		     ;; (charterm-cursor 1 data-row)
-		     ;; (charterm-insert-line)
-		     ;; (charterm-display "termvar ")
-		     ;; (charterm-bold)
-		     ;; (charterm-display (charterm-termvar ct))
-		     ;; (charterm-normal)
-		     ;; (charterm-display ", protocol ")
-		     ;; (charterm-bold)
-		     ;; (charterm-display (charterm-protocol ct))
-		     ;; (charterm-normal)
-		     ;; (charterm-display ", keydec ")
-		     ;; (charterm-bold)
-		     ;; (charterm-display (charterm-keydec-id (charterm-keydec ct)))
-		     ;; (charterm-normal)
-
-		     ;; (charterm-cursor 1 data-row)
-		     ;; (charterm-insert-line)
-		     ;; (charterm-display #"Screen size: ")
-		     ;; (charterm-bold)
-		     ;; (charterm-display col-count)
-		     ;; (charterm-normal)
-		     ;; (charterm-display #" x ")
-		     ;; (charterm-bold)
-		     ;; (charterm-display row-count)
-		     ;; (charterm-normal)
-		     ;; (or read-screen-size?
-		     ;; 	 (charterm-display #" (guessing; terminal would not tell us)"))
-
-		     ;; (charterm-cursor 1 data-row)
-		     ;; (charterm-insert-line)
-		     ;; (charterm-display #"Widths:")
-		     ;; (for-each (lambda (bytes)
-		     ;; 		 (charterm-display #" [")
-		     ;; 		 (charterm-underline)
-		     ;; 		 (charterm-display bytes #:width 3)
-		     ;; 		 (charterm-normal)
-		     ;; 		 (charterm-display #"]"))
-		     ;; 	       '(#"" #"a" #"ab" #"abc" #"abcd"))
-
-		     ;; (and (eq? 'wy50 (charterm-protocol ct))
-		     ;;      (begin
-		     ;;        (charterm-cursor 1 data-row)
-		     ;;        (charterm-insert-line)
-		     ;;        (charterm-display #"Wyse WY-50 delete character: ab*c\010\010\eW")))
-
 		     (loop-remember-read-screen-size read-col-count
 						     read-row-count))
                    ;; Screen size didn't change (or we didn't check).
                    (begin
-                     ;; (and clock-col
-                     ;;      (begin (charterm-inverse)
-                     ;;             (charterm-cursor clock-col 1)
-                     ;;             (charterm-display (parameterize ((date-display-format 'iso-8601))
-                     ;;                                 (substring (date->string (current-date) #t)
-                     ;;                                            11)))
-                     ;;             (charterm-normal)))
 
                      (let loop-fast-next-key ()
                        ;; (%charterm:demo-input-put-cursor di)
-                       (let ((keyinfo (charterm-read-keyinfo #:timeout 1)))
-                         (if keyinfo
+                       (let ((keyinfo (charterm-read-keyinfo #:timeout (if (message?) 2 1))))
+			 (if keyinfo
                              (let ((keycode (charterm-keyinfo-keycode keyinfo)))
-                               ;; (charterm-cursor 1 (sub1 read-row-count))
-                               ;; (charterm-insert-line)
-                               ;; (charterm-display "Read key: ")
-                               ;; (charterm-bold)
-                               ;; (charterm-display (or (charterm-keyinfo-keylabel keyinfo) "???"))
-                               ;; (charterm-normal)
-                               ;; (charterm-display (format " ~S"
-                               ;;                           `(,(charterm-keyinfo-keyset-id    keyinfo)
-                               ;;                             ,(charterm-keyinfo-bytelang     keyinfo)
-                               ;;                             ,(charterm-keyinfo-bytelist     keyinfo)
-                               ;;                             ,@(charterm-keyinfo-all-keycodes keyinfo))))
+
                                (case keycode				 
 				 ((left pgup)
 				  (begin (page (sub1 (page)))
@@ -447,8 +400,14 @@
 				  (loop-fast-next-key))
 				 (else (loop-fast-next-key))))
                              (begin
-                               ;; (charterm-display "Timeout.")
-                               (loop-maybe-check-screen-size video-files)))))))))))))))
+			       (if (message?)
+				   (begin
+				     (message? #f)
+				     (draw-ui video-files
+						  read-col-count
+						  read-row-count)
+				     (loop-fast-next-key))
+				   (loop-maybe-check-screen-size))))))))))))))))
 
 
 ;; Prints the current version of massmine, and useful info
