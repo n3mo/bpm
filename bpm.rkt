@@ -110,13 +110,20 @@
 
 ;;; Use this to determine which video file is listed first on the
 ;;; current page
+;; (define (page-lead lst-length rows)
+;;   (define max-vid (- rows 3))
+;;   ;;; (define max-vid 9) ;; debug
+;;   (let ((tmp (add1 (* (sub1 (page)) max-vid))))
+;;     (if (> (+ tmp (sub1 max-vid)) lst-length)
+;; 	(max 0 (- lst-length max-vid))
+;; 	tmp)))
 (define (page-lead lst-length rows)
   (define max-vid (- rows 3))
   ;;; (define max-vid 9) ;; debug
   (let ((tmp (add1 (* (sub1 (page)) max-vid))))
     (if (> (+ tmp (sub1 max-vid)) lst-length)
 	(max 0 (- lst-length max-vid))
-	tmp)))
+	(sub1 tmp))))
 
 ;;; Displays video titles, along with any meta-data info
 (define (display-titles lst cols rows
