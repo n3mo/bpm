@@ -22,6 +22,8 @@
 (define dialog-row (make-parameter 20))
 ;;; Current working directory root
 (define root-path (make-parameter #f))
+;;; List of video files
+(define video-files (make-parameter '()))
 ;;; Status message? When set to true, the main read key loop will
 ;;; pause extra long, before clearing the message and redrawing the
 ;;; screen
@@ -175,26 +177,40 @@
        (charterm-clear-line-right))
      (range 1 rows)))
 
-  (let loop ((pos (file-row)) (videos (drop lst start-point)))
-    (charterm-cursor 2 pos)
-    (charterm-clear-line-right)
-    
-    (when numbers?
+  ;; If there are no files to show, display a warning message
+  (if (null? lst)
       (begin
-	(charterm-cursor 3 pos)
-	(charterm-display (format "~A" (- pos (sub1 (file-row)))))))
+	(charterm-cursor 3 (- rows 1))
+	(charterm-clear-line-right)
+	(charterm-display "No files to display!"))
+      ;; Else, we display the available files
+      (let loop ((pos (file-row)) (videos (drop lst start-point)))
+	(charterm-cursor 2 pos)
+	(charterm-clear-line-right)
+	
+	;; If we're displaying line numbers, do that now
+	(when numbers?
+	  (begin
+	    (charterm-cursor 3 pos)
+	    (charterm-display (format "~A" (- pos (sub1 (file-row)))))))
 
-    (charterm-cursor 8 pos)
-    (if (and draw-cursor? (= pos (cursor)))
-	(begin
-	  (charterm-inverse)
-	  (charterm-display
-	   (path->string (file-name-from-path (car videos))))
-	  (charterm-normal))
-	(charterm-display
-	 (path->string (file-name-from-path (car videos)))))
-    (unless (or (= pos max-vid) (null? (cdr videos)))
-      (loop (+ pos 1) (cdr videos))))
+	;; Display any tags, such as deleted status indicator    
+	(when (member 'd (second (car videos)))
+	  (begin
+	    (charterm-cursor 5 pos)
+	    (charterm-display "D")))
+
+	(charterm-cursor 8 pos)
+	(if (and draw-cursor? (= pos (cursor)))
+	    (begin
+	      (charterm-inverse)
+	      (charterm-display
+	       (path->string (file-name-from-path (first (car videos)))))
+	      (charterm-normal))
+	    (charterm-display
+	     (path->string (file-name-from-path (first (car videos))))))
+	(unless (or (= pos max-vid) (null? (cdr videos)))
+	  (loop (+ pos 1) (cdr videos)))))
   ;; Redraw UI interface around file list
   (charterm-cursor 3 2)
   (charterm-clear-line-right)
@@ -206,12 +222,12 @@
   (draw-box cols rows))
 
 ;;; Call this whenever anything is updated
-(define (draw-ui video-files cols rows
+(define (draw-ui files cols rows
 		 #:numbers? (numbers? #f)
 		 #:delete? (delete? #f)
 		 #:draw-cursor? (draw-cursor? #t)
 		 #:pageless? (pageless? #f))
-  (display-titles video-files cols rows
+  (display-titles files cols rows
 		  #:numbers? numbers?
 		  #:clear? #t
 		  #:draw-cursor? draw-cursor?
@@ -226,7 +242,12 @@
 	    (case keycode
 	      ;; Confirm deletion
 	      ((#\Y)
-	       (trash-files video-files))
+	       (trash-files (map first files))
+	       (video-files (update-file-list))
+	       (charterm-cursor 3 (- rows 1))
+	       (charterm-clear-line-right)
+	       (charterm-display "Selection Deleted")
+	       (message? #t))
 	      (else
 	       (begin
 		 (charterm-cursor 3 (- rows 1))
@@ -237,33 +258,81 @@
 ;;; Play video file at cursor
 (define (play-selection lst rows)
   (let* ((idx (page-lead (length lst) rows))
-	 (path (list-ref (drop lst idx) (- (cursor) (file-row))))
+	 (path (first (list-ref (drop lst idx) (- (cursor) (file-row)))))
 	 (output-dump (open-output-string))
 	 (error-dump (open-output-string)))
     (parameterize ([current-error-port error-dump]
 		   [current-output-port output-dump])
-      (thread (λ ()
-		(system* (find-executable-path "mplayer")
-			 (path->string (expand-user-path path))))))))
+      ;; (thread (λ ()
+      ;;   	(process* (find-executable-path "mplayer")
+      ;;   		 (path->string (expand-user-path path))))))))
+      (process* (find-executable-path "mplayer")
+			 (path->string (expand-user-path path))))))
+
+;;; Toggle the deleted status of a file
+(define (toggle-deleted-status lst rows)
+  (let* ((idx (page-lead (length lst) rows))
+	 (path (first (list-ref (drop lst idx) (- (cursor) (file-row))))))
+    (define (toggle selection)
+      (if (equal? (first selection) path)
+	  ;; This is the file to toggle. Reset the deleted status
+	  ;; indicator 
+	  (list
+	   (first selection)
+	   (if (member 'd (second selection))
+	       (filter (λ (x) (not (equal? x 'd))) (second selection))
+	       (cons 'd (second selection))))
+	  ;; This item can be ignored. Return it as-is
+	  selection))
+    ;; Cycle through the files and toggle the required entry
+    (video-files (map toggle lst))))
+
 
 ;;; Dialog for deleting files
-(define (delete-selection lst cols rows)
-  (let* ((idx (page-lead (length lst) rows))
-	 (path (list-ref (drop lst idx) (- (cursor) (file-row))))
-	 (dir (let-values ([(a b c) (split-path path)]) a))
+;; (define (delete-selection lst cols rows)
+;;   (let* ((idx (page-lead (length lst) rows))
+;; 	 (path (list-ref (drop lst idx) (- (cursor) (file-row))))
+;; 	 (dir (let-values ([(a b c) (split-path path)]) a))
+;; 	 (file-name (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
+;; 				    (path->string (file-name-from-path path)) ""))
+;; 	 (files
+;; 	  (find-files
+;; 	   (λ (x)
+;; 	     (let ([tmp (file-name-from-path x)])
+;; 	       (if tmp
+;; 		 (string=? file-name
+;; 			   (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
+;; 					   (path->string tmp) ""))
+;; 		 #f)))
+;; 	   dir)))
+;;     (draw-ui files cols rows
+;; 	     #:delete? #t
+;; 	     #:draw-cursor? #f
+;; 	     #:pageless? #t)))
+(define (find-extra-files-for-deletion path)
+  (let ((dir (let-values ([(a b c) (split-path path)]) a))
 	 (file-name (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
-				    (path->string (file-name-from-path path)) ""))
-	 (files
-	  (find-files
-	   (λ (x)
-	     (let ([tmp (file-name-from-path x)])
-	       (if tmp
-		 (string=? file-name
-			   (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
-					   (path->string tmp) ""))
-		 #f)))
-	   dir)))
-    (draw-ui files cols rows
+				    (path->string (file-name-from-path path)) ""))) 
+
+    ;; Find and return a list of files matching the file name (but
+    ;; with different extensions)
+    (find-files
+     (λ (x)
+       (let ([tmp (file-name-from-path x)])
+	 (if tmp
+	     (string=? file-name
+		       (regexp-replace #px"\\.[[:alnum:]]{3,4}$"
+				       (path->string tmp) ""))
+	     #f)))
+     dir)))
+
+(define (delete-selected-files cols rows)
+  (let* ([files (filter (λ (x) (member 'd (second x))) (video-files))]
+	 [all-files (flatten (map find-extra-files-for-deletion (map first files)))]
+	 [tags (make-list (length all-files) '())]
+	 [full-list (map list all-files tags)])
+    ;; Use the UI to confirm deletion of files
+    (draw-ui full-list cols rows
 	     #:delete? #t
 	     #:draw-cursor? #f
 	     #:pageless? #t)))
@@ -336,137 +405,162 @@
 ;;                     #:width (%charterm:demo-input-width di))
 ;;   (charterm-normal))
 
+;;; Update the file list from disk
+(define (update-file-list)
+  (let* ([tmp (file-list (root-path))]
+	 [tags (make-list (length tmp) '())])
+    (map list tmp tags)))
+
 (define (run-bpm)
-  (let ((data-row 12)
-	(video-files (file-list (root-path))))
-    (with-charterm
-     (let ((ct (current-charterm)))
-       (let/ec done-ec
-         (let loop-remember-read-screen-size ((last-read-col-count 0)
-                                              (last-read-row-count 0))
+  (video-files (update-file-list))
+  (with-charterm
+   (let ((ct (current-charterm)))
+     (let/ec done-ec
+       (let loop-remember-read-screen-size ((last-read-col-count 0)
+					    (last-read-row-count 0))
 
-           (let loop-maybe-check-screen-size ()
-             (let*-values (((read-col-count read-row-count)
-                            (if (or (equal? 0 last-read-col-count)
-                                    (equal? 0 last-read-row-count)
-                                    (not (charterm-byte-ready?)))
-                                (charterm-screen-size)
-                                (values last-read-col-count
-                                        last-read-row-count)))
-                           ((read-screen-size? col-count row-count)
-                            (if (and read-col-count read-row-count)
-                                (values #t
-                                        read-col-count
-                                        read-row-count)
-                                (values #f
-                                        (or read-col-count 80)
-                                        (or read-row-count 24))))
-                           ((read-screen-size-changed?)
-                            (not (and (equal? read-col-count
-                                              last-read-col-count)
-                                      (equal? read-row-count
-                                              last-read-row-count)))))
-               ;; Did screen size change?
-               (if read-screen-size-changed?
+	 (let loop-maybe-check-screen-size ()
+	   (let*-values (((read-col-count read-row-count)
+			  (if (or (equal? 0 last-read-col-count)
+				  (equal? 0 last-read-row-count)
+				  (not (charterm-byte-ready?)))
+			      (charterm-screen-size)
+			      (values last-read-col-count
+				      last-read-row-count)))
+			 ((read-screen-size? col-count row-count)
+			  (if (and read-col-count read-row-count)
+			      (values #t
+				      read-col-count
+				      read-row-count)
+			      (values #f
+				      (or read-col-count 80)
+				      (or read-row-count 24))))
+			 ((read-screen-size-changed?)
+			  (not (and (equal? read-col-count
+					    last-read-col-count)
+				    (equal? read-row-count
+					    last-read-row-count)))))
+	     ;; Did screen size change?
+	     (if read-screen-size-changed?
 
-                   ;; Screen size changed.
-                   (begin
-		     ;; Set window parameters
-		     (dialog-row (- (round (/ read-row-count 2)) 3))
-		     (charterm-clear-screen)
-		     (draw-ui video-files read-col-count read-row-count)		     
-		     (loop-remember-read-screen-size read-col-count
-						     read-row-count))
-                   ;; Screen size didn't change (or we didn't check).
-                   (begin
+		 ;; Screen size changed.
+		 (begin
+		   ;; Set window parameters
+		   (dialog-row (- (round (/ read-row-count 2)) 3))
+		   (charterm-clear-screen)
+		   (draw-ui (video-files) read-col-count read-row-count)		     
+		   (loop-remember-read-screen-size read-col-count
+						   read-row-count))
+		 ;; Screen size didn't change (or we didn't check).
+		 (begin
 
-                     (let loop-fast-next-key ()
-                       ;; (%charterm:demo-input-put-cursor di)
-                       (let ((keyinfo (charterm-read-keyinfo #:timeout (if (message?) 2 1))))
-			 (if keyinfo
-                             (let ((keycode (charterm-keyinfo-keycode keyinfo)))
+		   (let loop-fast-next-key ()
+		     ;; (%charterm:demo-input-put-cursor di)
+		     (let ((keyinfo (charterm-read-keyinfo #:timeout (if (message?) 2 1))))
+		       (if keyinfo
+			   (let ((keycode (charterm-keyinfo-keycode keyinfo)))
 
-                               (case keycode				 
-				 ((left pgup)
-				  (begin (page (sub1 (page)))
-					 (draw-ui video-files
-						  read-col-count
-						  read-row-count))
-				  (loop-fast-next-key))
-				 ((right pgdn)
-				  (begin (page (add1 (page)))
-					 (draw-ui video-files
-						  read-col-count
-						  read-row-count))
-				  (loop-fast-next-key))
-				 ((up)
-				  (begin (cursor (sub1 (cursor)))
-					 (draw-ui video-files
-						  read-col-count
-						  read-row-count))
-				  (loop-fast-next-key))
-				 ((down)
-				  (begin (cursor (add1 (cursor)))
-					 (draw-ui video-files
-						  read-col-count
-						  read-row-count))
-				  (loop-fast-next-key))
-				 ((#\A)
-				  (begin (cursor (- (cursor) 4))
-					 (draw-ui video-files
-						  read-col-count
-						  read-row-count))
-				  (loop-fast-next-key))
-				 ((#\B)
-				  (begin (cursor (+ 4 (cursor)))
-					 (draw-ui video-files
-						  read-col-count
-						  read-row-count))
-				  (loop-fast-next-key))
-				 ((#\space)
-				  (play-selection video-files read-row-count)
-				  (loop-fast-next-key))
-				 ((#\n)
-				  (draw-ui video-files
+			     (case keycode				 
+			       ((left pgup)
+				(begin (page (sub1 (page)))
+				       (draw-ui (video-files)
+						read-col-count
+						read-row-count))
+				(loop-fast-next-key))
+			       ((right pgdn)
+				(begin (page (add1 (page)))
+				       (draw-ui (video-files)
+						read-col-count
+						read-row-count))
+				(loop-fast-next-key))
+			       ((up)
+				(begin (cursor (sub1 (cursor)))
+				       (draw-ui (video-files)
+						read-col-count
+						read-row-count))
+				(loop-fast-next-key))
+			       ((down)
+				(begin (cursor (add1 (cursor)))
+				       (draw-ui (video-files)
+						read-col-count
+						read-row-count))
+				(loop-fast-next-key))
+			       ((#\A)
+				(begin (cursor (- (cursor) 4))
+				       (draw-ui (video-files)
+						read-col-count
+						read-row-count))
+				(loop-fast-next-key))
+			       ((#\B)
+				(begin (cursor (+ 4 (cursor)))
+				       (draw-ui (video-files)
+						read-col-count
+						read-row-count))
+				(loop-fast-next-key))
+			       ((#\space)
+				(play-selection (video-files) read-row-count)
+				(loop-fast-next-key))
+			       ((#\n)
+				(draw-ui (video-files)
+					 read-col-count
+					 read-row-count
+					 #:numbers? #t)
+				(loop-fast-next-key))
+			       ;; Deleting files. Lowercase d
+			       ;; toggles deletion mark. Upper case
+			       ;; D initiates actual deletion of
+			       ;; toggled files
+			       ((#\d)
+				;; (delete-selection video-files
+				;; 		    read-col-count
+				;; 		    read-row-count)
+				(toggle-deleted-status
+				 (video-files)
+				 read-row-count)
+				;; For convenience in deleting lists
+				;; of files, move the cursor down
+				(cursor (add1 (cursor)))
+				;; Refresh the UI to show changes
+				(draw-ui (video-files)
+					 read-col-count
+					 read-row-count)
+				(loop-fast-next-key))
+
+			       ((#\D)
+				(delete-selected-files
+				 read-col-count
+				 read-row-count)
+				(loop-fast-next-key))
+			       
+			       ;; File information
+			       ((#\i)
+				(file-info video-files
 					   read-col-count
-					   read-row-count
-					   #:numbers? #t)
-				  (loop-fast-next-key))
-				 ;; Deleting files
-				 ((#\d)
-				  (delete-selection video-files
-						    read-col-count
-						    read-row-count)
-				  (loop-fast-next-key))
-				 ;; File information
-				 ((#\i)
-				  (file-info video-files
-					     read-col-count
-					     read-row-count)
-				  (loop-fast-next-key))
-				 ;; ((backspace)
-				 ;;  (%charterm:demo-input-backspace di)
-				 ;;  (loop-fast-next-key))
-				 ;; ((delete)
-				 ;;  (%charterm:demo-input-delete di)
-				 ;;  (loop-fast-next-key))
-				 ((#\q)
-				  (begin
-				    (charterm-clear-screen)
-				    (charterm-display "Browse/Play/Manage done")
-				    (charterm-newline)
-				    (done-ec))
-				  (loop-fast-next-key))
-				 (else (loop-fast-next-key))))
-                             (begin
-			       (if (message?)
-				   (begin
-				     (message? #f)
-				     (draw-ui video-files
-						  read-col-count
-						  read-row-count)
-				     (loop-fast-next-key))
-				   (loop-maybe-check-screen-size))))))))))))))))
+					   read-row-count)
+				(loop-fast-next-key))
+			       ;; ((backspace)
+			       ;;  (%charterm:demo-input-backspace di)
+			       ;;  (loop-fast-next-key))
+			       ;; ((delete)
+			       ;;  (%charterm:demo-input-delete di)
+			       ;;  (loop-fast-next-key))
+			       ((#\q)
+				(begin
+				  (charterm-clear-screen)
+				  (charterm-display "Browse/Play/Manage done")
+				  (charterm-newline)
+				  (done-ec))
+				(loop-fast-next-key))
+			       (else (loop-fast-next-key))))
+			   (begin
+			     (if (message?)
+				 (begin
+				   (message? #f)
+				   (draw-ui (video-files)
+					    read-col-count
+					    read-row-count)
+				   (loop-fast-next-key))
+				 (loop-maybe-check-screen-size)))))))))))))))
 
 
 ;; Prints the current version of massmine, and useful info
