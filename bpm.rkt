@@ -39,7 +39,7 @@
 ;;; more general audiences, this should probably be changed to "."
 ;; (define default-path "~/media/Television/")
 ;; (define default-path "~/main/work/teach/resources/intro_psych/videos/")
-(define default-path "~/Desktop/tmp/")
+(define default-path "~/media/Television")
 
 ;;; Location of trash directory on this system. For now, this assumes
 ;;; that you're either using Mac OS X or linux...
@@ -266,7 +266,9 @@
       ;; (thread (λ ()
       ;;   	(process* (find-executable-path "mplayer")
       ;;   		 (path->string (expand-user-path path))))))))
-      (process* (find-executable-path "mplayer")
+      ;; (process* (find-executable-path "mplayer")
+      ;;   		 (path->string (expand-user-path path))))))
+      (process* (find-executable-path "xdg-open")
 			 (path->string (expand-user-path path))))))
 
 ;;; Toggle the deleted status of a file
