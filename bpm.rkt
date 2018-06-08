@@ -6,7 +6,7 @@
 (require racket/path)
 
 ;;; Current version
-(define bpm-version "0.2.0 (2017-09-01)")
+(define bpm-version "0.2.1 (2018-06-08)")
 
 ;;; Parameters ----------------------------------------
 
