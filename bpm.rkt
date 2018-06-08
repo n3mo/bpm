@@ -380,7 +380,7 @@
 
 	(charterm-cursor box-left (+ box-top 3))
 	(charterm-display (make-string 1 #\+))
-	(charterm-display "  " (path->string (path->complete-path path)) #:width (- box-width 3))
+	(charterm-display "  " (path->string (path->complete-path (first path))) #:width (- box-width 3))
 	(charterm-display " ")
 	(charterm-display (make-string 1 #\+))
 
@@ -536,7 +536,7 @@
 			       
 			       ;; File information
 			       ((#\i)
-				(file-info video-files
+				(file-info (video-files)
 					   read-col-count
 					   read-row-count)
 				(loop-fast-next-key))
