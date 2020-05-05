@@ -268,8 +268,12 @@
       ;;   		 (path->string (expand-user-path path))))))))
       ;; (process* (find-executable-path "mplayer")
       ;;   		 (path->string (expand-user-path path))))))
-      (system* (find-executable-path "xdg-open")
-        		 (path->string (expand-user-path path))))))
+      ;; By default tries mpv, otherwise falls back to system default
+      (if (find-executable-path "mpv")
+          (system* (find-executable-path "mpv")
+                   (path->string (expand-user-path path)))
+          (system* (find-executable-path "xdg-open")
+                   (path->string (expand-user-path path)))))))
 
 ;;; Toggle the deleted status of a file
 (define (toggle-deleted-status lst rows)
